@@ -1,0 +1,616 @@
+%%% Notice: This file contains a large number of \verb's 
+%%%         or verbatim environments in order to display command names
+%%%         or examples.  But the use of \verb/verbatim is *not* recommended. 
+%%% ver.7 2018/05/15 
+\documentclass{pasj01}
+%\draft 
+%%%%%%%%%
+% Commands
+\usepackage{newtxtext,newtxmath}
+\usepackage[OT2,T1]{fontenc}
+
+\DeclareRobustCommand{\VAN}[3]{#2}
+\let\VANthebibliography\thebibliography
+\def\thebibliography{\DeclareRobustCommand{\VAN}[3]{##3}\VANthebibliography}
+\usepackage{graphicx}	% Including figure files
+\usepackage{color}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{booktabs}
+\usepackage{tcolorbox}
+\usepackage{url}
+% \usepackage{amsmath}
+
+\DeclareSymbolFont{cyrletters}{OT2}{wncyr}{m}{n}
+\DeclareMathSymbol{\Sha}{\mathalpha}{cyrletters}{"58}
+
+\newcommand{\umag}{\upsilon}
+
+\newcommand{\Emily}[1]{{\textcolor{Purple}{\bfseries{[#1]}}}}
+\newcommand{\Katherine}[1]{{\textcolor{ForestGreen}{\bfseries{[#1]}}}}
+\newcommand{\Chris}[1]{{\textcolor{red}{\bfseries{[#1]}}}}
+\newcommand{\Imcom}[1]{{\sc Imcom}}
+\newcommand{\Treecor}[1]{{\sc Treecor}}
+\newcommand{\Metacalibration}[1]{{\sc Metacalibration}}
+
+%%%%%%%%%%%%%
+\Received{$\langle$reception date$\rangle$}
+\Accepted{$\langle$accept date$\rangle$}
+\Published{$\langle$publication date$\rangle$}
+%% \SetRunningHead{Astronomical Society of Japan}{Usage of \texttt{pasj00.cls}}
+
+
+\begin{document}
+
+\title{Removing correlated noise from the {\textit{\textbf{Nancy Grace Roman Space Telescope}}} sensor chip array through destriping algorithms}
+\author{author list...}%
+\altaffiltext{}{Affiliations}
+\email{***@***.***.***}
+
+\KeyWords{image processing${}_1$ --- key word${}_2$ --- \dots --- key word${}_n$}
+
+\maketitle
+
+\begin{abstract}
+Measurements of weak gravitational lensing require extreme control of systematic errors. Even a small amount of error introduced by instrument systematics like the brighter-fatter effect, inter-pixel capacitance, or correlated noise can bias weak lensing measurements of galaxy shear $\gamma$ by a significant factor. Previous works have shown the H4RG detectors of the Nancy Grace Roman Space Telescope (\textit{Roman}) Wide Field Instrument (WFI) show correlations in their noise fields at a level significant for weak lensing measurements, even after application of reference pixel corrections. In this paper, we 
+%In this paper, we work towards mitigating the shear bias introduced by correlated detector noise from the H4RG detectors on the Nancy Grace Roman Space Telescope (\textit{Roman}) Wide Field Instrument (WFI), for the purpose of optimizing the \textit{Roman} weak lensing survey. 
+present \texttt{imDestripe}: a new \texttt{Python} module utilizing \textit{Roman's} multiple dithered image observing strategy and linear algebra techniques to remove correlated noise stripes from observed images. We assess the success of this method at suppressing correlated read noise, and further estimate the improvement on weak lensing statistics gleaned from the algorithm's application.
+\end{abstract}
+
+\section{Introduction}
+
+The Nancy Grace Roman Space Telescope\footnote{\url{https://roman.gsfc.nasa.gov/}} (\textit{Roman}), launching in 2026, will use its Wide Field Instrument (WFI) to take some of the most precise measurements of the cosmos to date. One of \textit{Roman}'s central science goals is a thorough weak gravitational lensing survey (\citep{Akeson2019}, \cite{Spergel2015}). Weak lensing is an extremely promising, though extremely difficult, method for learning about the universe; in combination with other probes, good weak lensing measurements will allow us to test fundamental aspects of our current standard model for the universe, including the nature of dark matter and dark energy (\cite{Weinberg2013}). However, it is the specification of ``good'' weak lensing measurements where the difficulty lies. 
+
+Weak lensing requires an extremely large number of galaxies' shapes to be measured extremely precisely, implying that faint and distant galaxies will have to be included in the survey. This requires not only very sensitive instruments but also near-perfect control over systematic effects that might introduce errors into the shape measurements themselves (\cite{Mandelbaum2018}). The Roman Science Requirements Document \footnote{\url{https://roman.gsfc.nasa.gov/science/docs/RST-SYS-REQ-0020D_DOORs_Export.pdf}} (SRD) specifies that galaxy shears must be measurable to within $\sim5\times10^{-4}$.
+
+Many groups have been working hard on measuring potential sources of systematic error for the \textit{Roman} weak lensing survey. \cite{Givans2022} studied charge diffusion and quantum yield in Roman's H4RG detectors, and found that charge diffusion contributes a strong but correctable contamination to the weak lensing shear signal. \cite{PlazasMalagon2024}, \cite{Choi2020}, and \cite{Paine2025} have studied the brighter-fatter effect and its impact on weak lensing signal as well.
+Yet another source of bias on shape measurements is correlated detector noise (see, eg. \cite{Rauscher2011} for a discussion of correlated noise), which can introduce biased second moment measurements, biased galaxy selections, and complications in error propagation. \cite{Laliotis2024} showed that the level of correlated $1/f$ noise on \textit{Roman} SCAs is significant, and causes a bias on measured galaxy shapes that exceeds the requirement level from the SRD. 
+
+While correction of biases within the weak lensing measurement pipeline is possible, it might be simpler to start earlier in the process. To this end, removal of correlated instrument noise is a significant step in the \textit{Roman} image processing pipeline. The \textit{Roman} detectors each possess a set of reference pixels, which do not collect photons from the sky, but read information about noise and electronic properties within the detector. The Improved Roman Reference Correction (IRRC; Rauscher et al, in prep) will be applied to \textit{Roman} images during the level 1 - level 2 processing steps of RomanCal as a first level of noise removal. IRRC uses the reference pixels on each detector to optimally correct correlated noise on resultant frames using linear algebra techniques. However, even after application of IRRC some correlated noise persists at levels above the theoretical limit; correlated noise structures still appear in the up-the-ramp slope images (\cite{STSci-673}).
+
+To further correct the remaining $1/f$ noise, in this work we present \texttt{imDestripe}: a de-striping algorithm to remove correlated noise from \textit{Roman} images. The algorithm is modeled off of similar ideas developed in the Cosmic Microwave Background (CMB) scientific community, such as \cite{Keihanen2004}, \cite{Delabrouille1998}, and \cite{Sutton2009}. 
+
+However, in order to be made applicable to \textit{Roman} images, several fundamental adjustments had to be made, including:
+
+\begin{enumerate}
+    \item accounting for a much larger data volume \Katherine{estimate}
+    \item a more complicated PSF, which factors into the projection matrix 
+    \item implementation of bright object and cosmic ray masks
+    \item assessing the impact of image undersampling, which may or may not pose a concern for this method
+\end{enumerate}
+
+\section{Correlated Noise on the Roman H4RGs}
+
+\subsection{H4RG detectors and noise}
+
+The \textit{Roman} telescope Wide Field Instrument (WFI) is made up of 18 H4RG-10 detectors, which were manufactured by Teledyne. Detectors are 4K X 4K pixels, including reference pixels on each edge which are never exposed to light and instead used for first-order image corrections. The detectors generally consist of three layers: an anti-reflective (AR) coating, a HgCdTe semiconductor infrared absorber layer, and a Si readout integrated circuit (ROIC). Each pixel acts as a photodiode, converting photons into electron-hole pairs, and connects to the ROIC via an indium ``bump'' (\cite{Mosby2020}).
+
+During testing of the H4RG-10 detectors, the pixel design was optimized to minimize the total noise, along with other detector systematics (\cite{Mosby2020}). These detectors typically show both white read noise and pink, or $1/f$, noise. To characterize the noise on the \textit{Roman} detectors, multiple rounds of testing were done by the team at the Detector Characterization Lab at Goddard Spaceflight Center \Katherine{cite}. For this work, we use the set of images that were taken under the conditions most similar to flight. The detectors were integrated into the telescope focal plane, and darks were taken at \Katherine{ $148$ second exposures consisting of 50 nondestructive reads of each pixel, based on the reference survey observing plan} (\cite{Akeson2019}). 
+Rather than using individual frames for analysis, we fit each pixel's signal across reads to a line once per exposure. The slope of this line becomes the signal per pixel in our exposure ``up-the-ramp slope'' images, making the native units of our images fluxes rather than intensities.
+
+An example dark slope image is shown in the upper left panel of Figure \ref{fig:spectra-comparison}. The overall noise level is small, but clearly nonzero and containing some interesting features. 
+
+The majority of the noise on the Roman H4RGs is stationary white noise. Figure \Katherine{make a fig of a noise power spectrum of 18 SCAS all on one set of axes} illustrates this by plotting the power spectrum of the noise from one dark exposure for each \textit{Roman} flight SCA. The left panel shows clearly that most frequencies have constant power, meaning that the noise is uncorrelated and stationary. Plotting on a log-log scale (right panel, Figure), we see a changing power spectrum in low frequencies, suggesting the noise is correlated in this range. 
+
+ For this paper, we focus on the correlated $1/f$ noise, so we will briefly describe the origin of that aspect of noise only. The causes of various types of noise in HXRG detectors in general are described in depth in \cite{Rauscher2011}. For $1/f$ noise, the predominant theory is that it is caused by the source-follower FET in the ROIC. As holes make their way through the HgCdTe substrate, they sometimes get trapped. These traps are caused by atoms in the substrate who have empty states between the valence and conduction bandgap engineered into the material. They thus have a timescale over which they are expected to ``trap" and ``release'' holes. The catch-and-release of holes on specific time scales results in a roughly oscillatory pattern in the source voltage, as charges are withheld or dumped onto the gate and change the gate voltage. In Fourier space, the autocorrelation of the source voltage change over time is a Lorentzian, which decays like $1/f^2$. As traps are nonuniform, the nonideal detectors have multiple trap timescales, and what we actually observe is the superposition of many of these patterns. Superimposing multiple Lorentzian functions at different frequencies results in a tail that behaves like $1/f$. \Katherine{derivation in appendix? picture?}
+
+However, the FET+trap mechanism is unlikely to be the cause of the $1/f$ noise we observe in \textit{Roman} WFI darks; it mechanism creates noise on a per-pixel basis, which gets converted into white noise when our pixels are constructed into a 2D image. After pixels are read out via their own source-followers, their signal is transferred to a column bus. Finally, the signal is fed from the column bus to an output source-follower, which is expected to cause another set of $1/f$ noise. This is believed to be the $1/f$ noise we observe in the output darks.
+
+\Katherine{Should ask Bernie to look at this section}
+
+\subsection{Current state of correlated noise correction}
+
+While white noise is random, pink noise is correlated, which can lead to biases in measurements one may want to take using the WFI. In particular, in \cite{Laliotis2024} we showed that correlated noise at the level detected on the \textit{Roman} detectors induces an additive bias on galaxy shape measurements. The estimated bias was above the required level for the weak lensing survey, illustrating a need for a method of correcting correlated noise if weak lensing measurements are to reach their required precision.
+
+There are several existing methods of correcting for noise stripes on images. In \cite{Laliotis2024}, a simple correction scheme is applied using reference pixels as anchor points to a linear fit to the dark signal across each row. The value of the noise signal at each pixel position is then subtracted from the pixel value in the image. This simple reference pixel correction scheme is commonly used \Katherine{cite}, but was demonstrated to be insufficient for Roman-level precision.
+
+The \textit{Roman} image processing pipeline is also expected to incorporate the Improved Roman Reference Correction (IRRC) algorithm from Rauscher et al, in prep. This algorithm, adapted from the Simple Improved Reference Subtraction (SIRS; cite) used for JWST NIRCam images, utilizes linear algebra methods to optimally reduce correlated noise. \Katherine{STSci673} demonstrate that the IRRC method is superior to simple reference row subtraction and reduces power in $1/f$ noise by a factor of 20 in individual resultant frames. However correlated noise is still not completely removed; the power spectrum of an up-the-ramp slope image constructed from IRRC-corrected resultant frames shows no significant reduction in the low frequency $1/f$ noise power, compared to a slope image with no correction applied.
+% 
+The best path forward towards minimizing correlated noise for \textit{Roman} will be some combination of previously used methods with any new methods developed as well. We now describe \texttt{imDestripe}, a new method of removing correlated noise from IR detectors. imDestripe will be integrated into the weak lensing measurement pipeline for Roman, after calibration (including IRRC) but prior to the image coaddition step. 
+
+\section{Destriping Theory}
+\label{sec:theory}
+
+The destriping algorithm we present in this work is based on the CMB destriping algorithm from \cite{Sutton2009}; we follow their notation and begin with an overview of the basic destriping algorithm methods. Then we will discuss modifications to the algorithm, tuned to the \textit{Roman} needs.
+ 
+\subsection{Destriping Algorithm Overview}
+\label{subsec:labdata}
+
+Observations using the \textit{Roman} WFI will result in a stream of time-ordered data (TOD). If a given SCA has N pixels in a certain row, the length N vector of TOD $y_t$ can be represented as \begin{equation}y_t = P x_t + n_t ,\label{eq:tod}\end{equation} where P is an $NxN$ matrix projecting the observation onto the true sky map, $x_t$. $n_t$ represents the total noise per observation, which will in general include both correlated and uncorrelated components. Assuming that these noise fields are independent, we can further split $n_t = n_w + n_c$, white noise $n_w$ and correlated noise $n_c$. 
+
+Our goal is to model the correlated noise as a set of offset functions which can be subtracted out from the Roman SCA images, resulting in mosaic images that have minimal correlated noise. We model correlated noise in a single image as 
+\begin{equation}n_{c} = \sum_{\alpha} \textbf{F}_{\alpha}\,p_{\alpha}\label{eq:nc-simple}\end{equation}
+, where $\textbf{F}_{\alpha}$ is some set of basis functions, $p_{\alpha}$ are their amplitudes, and $\alpha$ denotes a single row of pixels across the image. For simplicity, we start by choosing $\textbf{F}_{\alpha} = 1$, making $n_c = p$, a single constant offset for our row $y_t$.  
+
+\subsection{Specifics for \textit{Roman}}
+
+The Roman WFI, shown in \Katherine{figure}, consists of 18 detectors (also known as Sensor Chip Assemblies, SCAs). The SCAs are $4096\times4224$ grids of pixels, broken up into 33 vertical readout channels. Each SCA has a frame of "reference pixels," which are not light-collecting and instead serve to measure the behavior of detector electronics. The reference pixel frame is four pixels wide on each edge of the detector, plus an entire readout channel on one edge, making the "active" region of an SCA $4088\times4088$ pixels (32 readout channels).
+
+In this work, we will use capital roman letters $A, B, ...$ to refer to individual SCA exposures. For a single exposure, $A$ could only range from 1-18, but note that we will be handling multiple exposures at once, so $A$ will range much larger than that. Rows of pixels will be denoted by lowercase Greek letters, $\alpha, \beta,...$, which will range from $0 - 4087$, as we consider only the active channels plus their four reference pixels. Finally, individual pixels are indexed by lowercase Roman letters $i, j, ...$, which will range from $0\rightarrow (4088^2-1)$. The signal in pixel $i$ of image $A$ would thus be denoted $x_{Ai}$. We will also introduce the symbol $\delta_{\alpha i}$ such that:
+
+\begin{equation}
+\delta_{\alpha\,,Ai} = \begin{cases}
+1 & \text{if pix. } i \text{ in row } \alpha \text{ of image A},\\
+0  & \text{if pix. } i \text{ not in row } \alpha \text{ of image A.}
+\end{cases}
+\end{equation}
+
+This makes our simple correlated noise model Equation \ref{eq:nc-simple}
+\begin{equation}
+    n_{c, Ai} = \sum_{i=0}^{4095^2}\sum_{\alpha=0}^{4095} p_{A\alpha}\delta_{\alpha i}
+\end{equation}
+
+for a single SCA exposure.
+
+The projection matrix $P$ seen in equation \ref{eq:tod} generally transforms a given pixel on the true sky map to its observed position and value on the detector. In principle, this could be as simple as a matrix of $0s$ and $1s$ where pixels on the sky map are found in observations. However, the \textit{Roman} TOD for a single mosaic will consist of multiple exposures taken at dithered pointings and different roll angles, resulting in $\sim500$ images per coadd mosaic. Additionally, our P matrix depends on the \textit{Roman} PSF $G_{img, i}$: \begin{equation}P_{iA} = G_{img, i}\,(\Vec{r}_i - \Vec{R}_A)\,\Omega_{grid}  .\end{equation} 
+The vectors $\Vec{r}_{i}$ and $\Vec{R}_{i}$ refer to a position in the true sky map and the observed image, respectively. $\Omega_{grid}$ is the solid angle of a single cell of the true sky grid, used here to normalize $P_{iA}$. 
+
+For the real survey, the PSF will be calibrated based on bright stars. For this work, we use the OpenUniverse2024 simulation suite (\cite{OpenUniverse2025}), in which the PSF is modeled based on known parameters of the telescope. As \textit{Roman} is diffraction-limited, the PSF width will be constrained by $\lambda/D$, the observing band and entrance pupil diameter. 
+
+\section{imDestripe}
+
+The \texttt{imDestripe} algorithm is designed to be run on a single mosaic, which is made up of $~500$ individual SCA images $I_A$ and covers $1$ deg$^2$ of the sky. Overall, the algorithm is designed to remove stripes of correlated noise from the input images, ultimately solving for an optimally flat sky background in the mosaic image. In the future, we plan to expand the capacity of imDestripe to include vertical noise stripes from channel offsets and an overall sky background correction.
+
+The algorithm is laid out as follows. A flow chart representing the main steps of the process can be found in Figure \ref{fig:flowchart}.
+
+First, we import a given image $I_A$ which is inside the mosaic. We add in real detector noise images $N_A$, which are slope images of read noise frames collected in lab experiments plus a Poisson sky background (see \cite{Laliotis2024} for processing details). The image is then multiplied by its lab-tested hot pixel mask, $M_A$ to remove degenerate pixel regions from the image. We also search for and mask out bright objects (eg. bright stars, cosmic rays, etc.), so that their large flux does not bias the background calculation. For this work, we choose to mask out pixels $I_{Ai}$ with \Katherine{flux F greater than NN}, along with $I_{A,i\pm[0,2]}$ to avoid contamination. In principle this value can be changed to accommodate the user's needs, but we found that \Katherine{NN} was ideal for reducing a flat background. Our input images ultimately take the form 
+\begin{equation}I_A = \begin{cases}
+(I_{A, \rm{raw}} + N_A ) \cdot M_A & \text{for } I_{A, i\pm[0,2]}<NN \\
+0 & \text{else}
+\end{cases}\end{equation}
+
+Correlated noise is modeled by a vector $\textbf{p}$ of constant offset parameters, with one parameter for each row $\alpha$ (4088 pixels per row) in each image, ultimately resulting in a $N_{\text{images in the mosaic}} \times 4088$ matrix. Each Roman SCA covers $~1/8\deg\,\times~1/8\deg$ of arc on the sky, and mosaic images are $1\deg\times1\deg$, so it takes $~64$ exposures to cover a mosaic image. For ideal coverage of a region of sky, we ai for 6 individual exposures of each region. Additionally accounting for edge effects (partial image-overlaps around mosaic boundaries), we thus expect $\sim500$ SCA images per mosaic; this results in \textbf{p} of length $~2\times10^6$. We additionally leave open the option for other parameters (such as sky background level) to be fit to the mosaic using \textbf{p}, so it may in principle be larger than this estimate.
+
+We use \textbf{p} to create a de-striped image: \begin{equation} \label{eq:IAi}
+    \tilde{I}_{A} = I_{A} - \sum_{\alpha} p_{A\alpha} \delta_{\alpha\,,Ai} 
+\end{equation}
+where $A$ is a single image, $i$ denotes a single pixel (with coordinates $(x_i, y_i)$ ), $\alpha$ denotes a particular row of pixels.
+
+Before solving for the optimal parameters \textbf{p} that will accurately remove our image's correlated noise background, we need a method for testing the accuracy of those parameters. 
+We define a cost function for the de-striped image
+
+\begin{equation}\label{eq:epsA} \epsilon_A(\mathbf{p_{A}}|\tilde{I}_A) = \sum_{i} \Bigl[ f \bigl( \tilde{I}_{Ai}-\tilde{J}_{Ai} \bigr) \Bigr]\end{equation}
+
+\Katherine{+prior term?} We define $\tilde{J}_{Ai}$ as an interpolated version of $\tilde{I}_A$ constructed from other de-striped images ($\tilde{I}_B, \tilde{I}_C, ...$) that overlap image A: 
+
+\begin{equation} \label{eq:JAi}
+\tilde{J}_{A, i} = \frac{\sum_{B,j} G_{Bj} w_{Ai;Bj}\tilde I_{Bj}}{G_{Ai}{\cal N}_{B|Ai}} ,
+\end{equation}
+
+where: the sum is over pixels $j$ in image $B$ that overlap pixel $A, i$; $w_{Ai;Bj}$ are interpolation weights, with $\sum_j w_{Ai;Bj}=1$; and ${\cal N}_{B|Ai}$ is the number of overlapping images $B$ contributing to the sum. The interpolated image additionally has to be scaled to account for differences in the pixel response function between pixel $j$ in image $B$ and pixel $i$ in image $A$. We do this by calculating an effective gain,
+\begin{equation}\label{eq:Geff}
+    G_{Bj} \propto \Bigl[ t_{\text{exp},B} \Omega_{Bj} \int \frac{d\lambda}{\lambda} A_{\text{eff},Bj}(\lambda)\Bigr]^{-1}
+\end{equation}
+
+For the current version of simulated images, the effective area integral and the exposure time are both constant in each image (though this may change in future simulations). The pixel areas $\Omega_{Bj}$ vary due to distortions. Effective area integrals in each observation filter are calculated in \cite{Laliotis2024}; the resulting areas are:
+\begin{equation}\label{eq:area}
+    \int_{\nu} A_{\text{eff}}(\lambda) / \lambda \:\: d\lambda = 
+    \begin{cases}
+        7006\,  \text{ cm}^2, & \text{Y}106\\
+        7111\,  \text{ cm}^2, & \text{J}129\\
+        7340\,  \text{ cm}^2, & \text{H}158\\
+        4840\,  \text{ cm}^2, & \text{F}184\\
+        4654\,  \text{ cm}^2, & \text{K}213\\
+        22085\,  \text{ cm}^2, & \text{W}146
+    \end{cases}
+\end{equation}
+
+The total amount of error in a mosaic image will be calculated as $\epsilon(\mathbf{p}) = \sum_{A} \epsilon_A\,(\mathbf{p_A}|I_A)$ . 
+
+To solve for the optimal de-striping parameters $p$, we utilize the nonlinear method of conjugate gradient descent, minimizing the cost function Equation \ref{eq:epsA}. The direction of steepest descent is given by the negative of the residual, 
+
+\begin{equation} \begin{split} \mathbf{r}
+=\nabla_p \epsilon(\mathbf{p}) \\ 
+ =\sum_{A} \Biggl\{ \sum_{i} \Bigl[ f' \bigl( \tilde{I}_{Ai}-\tilde{J}_{Ai} \bigr) \bigl(\frac{\partial\,\tilde{I}_{Ai}}{\partial\,p_{A,\alpha}} -\frac{\partial\,\tilde{J}_{Ai}}{\partial\,p_{A,\alpha}} \bigr) \Bigr] \Biggr\} \\
+ =\sum_{A} \Biggl\{ \sum_{i} \Bigl[ f' \bigl( \tilde{I}_{Ai}-\tilde{J}_{Ai} \bigr) \times \\
+ \bigl(\frac{\partial\,\tilde{I}_{Ai}}{\partial\,p_{A,\alpha}} - \frac{\sum_{B,j} G_{Bj} w_{Ai;Bj} ( \partial\,\tilde{I}_{Bj}/\partial\,p_{A,\alpha} )}{G_{Ai} {\cal N}_{B|Ai}} \bigr) \Bigr] \Biggr\} \\
+ = \sum_{A} \Biggl\{ \sum_{i} \Bigl[ f' \bigl( \tilde{I}_{Ai}-\tilde{J}_{Ai} \bigr) \bigl(-\delta_{\alpha,Ai}-\sum_{Bj}\frac{G_{Bj}w_{Ai;Bj}}{G_{Ai}{\cal N}_{B|Ai}}(-\delta_{\alpha,Bj})\bigr) \Bigr] \Biggr\}
+ \end{split}
+ \end{equation}
+
+The conventional choice for the cost functional form $f$ in conjugate gradient optimization is $f(x)=x^2$, resulting in a linear residual function with a mean of zero. Since the input data is not truly Gaussian, we include an option to use a Huber loss function
+\begin{equation}
+f(x) = \begin{cases}
+|x| & ,\,\, |x| > N \\
+x^2 & ,\,\, |x| < N
+\end{cases}\label{eq:HL}
+\end{equation}
+
+as the cost function instead; this option is preferred for mitigating the effects of outliers in the data on parameter optimization. For this work, we perform the optimization of \textbf{p} using the quadratic cost function, chosen for its continuous behavior in all regions. 
+
+The general conjugate gradient algorithm is outlined below; the full algorithm implementation is detailed in Appendix \ref{app:codenotes} and the code is \Katherine{open-source in pyimcom.} 
+
+To start, the parameters $p_{(0)}=0$. The first gradient is calculated $r_{(0)}=-\nabla\epsilon(I, J, p_{(0)})$, using the cost function $\epsilon$ defined above and generally dependent on the image $I$, its interpolated version $J$, and the current de-striping parameters $p$. After this initial iteration, the algorithm repeats the following steps for each iteration $(n)$:
+
+\begin{enumerate}
+    \item Calculate the direction of steepest descent, $r_n = -\nabla\epsilon(I, J, p_n)$
+    \item Update the direction step size $\beta$ using the Polak-Ribiére method, $\beta_{n} = \frac{r_{n}^T(r_{n}-r_{n-1})}{r^T_{n-1} r_{n-1}}$
+    \item Update the conjugate direction, $d_n = r_n + \beta_n d_{n-1}$
+    \item Using a linear search, minimize $\epsilon(I, J,\alpha_nd_n)$ to recover the optimal direction depth for the next step $\alpha_n$
+    \item Update the parameters $p_{n+1} = p_n + \alpha_nd_n$
+\end{enumerate}
+
+The algorithm converges when the norm $||r_n|| \leq C_{tol}\,||r_{(0)}||$, where the tolerance is $10^{-3}$ in this work but in general is set by the user. 
+
+The user can choose between the Fletcher-Reeves, Polak-Ribiére, Hestenes-Steifel, and Dai-Yuan methods for calculating the direction step size $\beta$. In this work, $\beta$ is updated via the Polak-Ribiére method, as it often converges faster then Fletcher-Reeves and requires less information to be stored than the other two. However, it is known that the Polak-Ribiére method can sometimes lose direction conjugacy and never converge. This potential issue is avoided by selecting the maximum between $\beta^{PR}$ and $0$; resetting $\beta$ to zero restores conjugacy if it has been lost by resetting the direction to the negative gradient \footnote{We refer the interested reader to \url{https://www.cs.cmu.edu/~quake-papers/painless-conjugate-gradient.pdf}{An Introduction to the Conjugate Gradient Method Without the Agonizing Pain} for further details on the conjugate gradient algorithm and relevant choices within it}.
+
+The user may also specify the functional form of the cost function. Currently \texttt{imDestripe} supports quadratic, absolute value, or Huber loss function (eq. \ref{eq:HL}). For this work, we compared the quadratic and Huber loss functions only; as we expect our parameters to be small, the behavior of the absolute value function near zero would have caused some problems. \Katherine{We found X choice to be optimal for this problem.. Actually maybe this (and the above discussion of the choice of PR) should go in the performance tests section??}
+
+Finally, the linear search is carried out through a hybrid bisection-secant method, where $\alpha$ is bisected until subsequent steps are within a minimum distance $\delta\alpha$ from one another, at which point the search switches to taking secant steps. The $\delta\alpha$ criterion may be specified by the user; in this work, we use $\delta\alpha<0.01$.
+
+The linear search and gradient calculations run in parallel for each SCA in the mosaic, updating the relevant rows of the $p$ vector as they go. The results of the cost and residual functions are summed up when needed to evaluate whether to converge. The decision to parallelize the algorithm was made in order to improve efficiency.
+
+Once the conjugate gradient descent has converged on a set of parameters $p_{final}$, we take the optimized destriping parameters and, subtracting them from their corresponding images, construct the final destriped images $\tilde I_{A, B, C...}$ which can then be coadded using \cite{Cao2025} into a full mosaic image.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=0.8\linewidth]{imDestripe Flow Chart.pdf}
+    \caption{Flow chart depicting the main process of \texttt{imDestripe}. Light blue directives are calculated image-by-image for each SCA contributing to the mosaic, while the dark blue steps are executed while considering all SCAs at once. The purple squares show the variables representing the product of each step, to help the reader relate steps described here to equations in the paper.}
+    \label{fig:flowchart}
+\end{figure*}
+
+\section{Performance Tests}
+
+We ran tests of the \texttt{imDestripe} algorithm on the Cardinal cluster of the Ohio State Supercomputer. On a test run with 13 overlapping exposures, using 1 node and 13 cores, the algorithm converged after 40 iterations of the conjugate gradient algorithm over 15 hours. Each CG iteration took between 20 and 30 minutes. The CPU efficiency was 56.16\% and job used 45.50 GB of memory, resulting in 72.31\% memory efficiency. 
+
+To assess the success of \texttt{imDestripe} in removal of correlated noise, we compare several pre- and post- destriping statistics. We note here that the noise slope images used in this analysis have already been corrected by a simple reference pixel correction scheme described in Section \Katherine{N} of \Katherine{Laliotis et al}. However, they have not undergone the Simple Improved Reference Subtraction (SIRS) algorithm, which we expect to be used as a first level of correlated noise mitigation on \textit{Roman} images. We plan to explore the total correlated noise mitigation achieved combining all current strategies we have in mind for \textit{Roman} in future work.
+
+Before destriping, we calculate the mean and standard deviation for pixels in each row of the image, both across the whole image and along output channels (columns of 128 pixels that are connected to a single readout). The pre-destriping standard deviation of row means is \Katherine{N} in the whole image, and on average \Katherine{N} per output channel. After destriping, these values are reduced to \Katherine{N} and \Katherine{N}, respectively. \Katherine{probably make this a table actually and just describe the findings here}.
+
+We define a noise residual for each row as the median noise level in that row subtracted from the average of those medians from each row.
+Figure \Katherine{medians/resids figure} shows the noise residual for each row in the image, pre- (pink) and post- (purple) destriping. There is a clear decrease in the variance of the medians after \texttt{imDestripe} has been applied. This can also be seen in the histogram panel of the figure, where the medians after destriping are not only more strongly peaked at zero, but also more suppressed at large values, making the histogram appear closer to Gaussian. 
+
+Following \cite{Rauscher2022}, we further quantify the deviation of the remaining noise from Gaussian (uncorrelated, white noise) by calculating higher-order moments of our distribution. Deviation of these parameters from their expected values for a normal distribution would indicate that a model more complex than a constant offset (Equation \ref{eq:nc-simple}) might be needed to capture the correlated noise accurately. \Katherine{make this figure, discuss results}.
+
+It is common practice to study the significance of image noise by investigating the noise power spectrum, the square magnitude of the image's Fourier Transform. Significant features of the power spectrum give us key insights about the contributing sources of noise. We use \texttt{SciPy}'s \texttt{Fast Fourier Transform} to compute the Fourier transforms required for this analysis.
+
+To isolate the impact of destriping on noise, we take our final set of de-striped images and subtract out the initial noise-less simulation, leaving blank masked regions where observed objects would have been. The noise images for one SCA (observation $670$ on SCA $10$) can be seen in the top row of Figure \ref{fig:spectra-comparison}. The middle panel of Figure \ref{fig:spectra-comparison} shows the 2D power spectrum of those noise frames,  pre- (left) and post- (right) \texttt{imDestripe}. The pre-destriping power spectrum shows a high-powered streak of correlated noise as a diagonal line through the center of the spectrum. \Katherine{Relate the line to the knee frequency or further characterize it somehow?} On the right panel, one can clearly see that this feature has disappeared-- there do not appear to be any significant correlations in the noise after image destriping. 
+
+% The bottom panel shows the radial profile of the noise power spectra, achieved by calculating the average value in azimuthal bins 4 pixels wide. We see two significant improvements from the left to the right panel. First, the overall level of the noise has decreased significantly. This implies that correlated noise was contributing very significantly to the overall noise level in our images. Application of \texttt{imDestripe} therefore can be expected to improve overall image quality, and thus science measurements like galaxy shapes. Second, we see significant suppression of the characteristic $1/f$ noise ``knee'' frequency which we see clearly in the pre-destriping image. \Katherine{The knee frequency is caused by something and thus is attributed to correlated noise when observed.} Its suppression due to \texttt{imDestripe} indicates a successful removal of correlated noise.
+
+We also show the flattened one-dimensional power spectrum of the up-the-ramp slope images before and after application of destriping in Figure \ref{fig:PS_reduction}.
+
+\begin{figure}
+ \centering
+    \includegraphics[width=0.8\linewidth]{PS_reduction.png}
+    \caption{}
+    \label{fig:PS_reduction}
+\end{figure}
+
+
+\begin{itemize}
+
+\item is there a way for me to calculate average noise suppression as a function of N overlapping images at a region? Or as a function of the total roll angle between exposures overlapping in an image? then we could say something about how much we need to be rolling / how much we need to be overlapping regions in order to successfully destripe ???
+
+% \item propagate through my old read noise analysis;
+% make final noise 2D power spectra (again probably using $I_{A,final}-I_{A, noiseless}$), final 1D spectra, and estimation of additive noise bias from de-striped images if possible  
+% \item I actually think the above is too much, maybe i can do a quick and dirty estimate from the PS and save that for the next thing
+\end{itemize}
+
+\begin{figure*}
+ \centering
+    \includegraphics[width=0.8\linewidth]{comparison.png}
+    \caption{Figure showing the overall performance of \texttt{imDestripe} on observation 670, SCA 10. Images on the left (right) show pre-destriping (post-destriping) results. \textit{Top}: The Full-SCA noise slope image in units of $e^-/140s $exposure. Note that the left and right panels share the same scale-- a clear reduction of overall noise level can be seen by eye. \textit{Middle}: Power spectra of the above noise frames, in units of $(e^-/140s$ exposure $/'')^2$. Note that the left and right panels do not show the same scale, though one can see from the limits that the reduction in power is significant. Specifically, the diagonal line corresponding to the $1/f$ noise on the left is no longer visible on the right. \textit{Bottom}: Azimuthal averages of the power spectra pictured above. The power spectra are grouped into radial bins 4 pixels wide. Here we can see the characteristic $1/f$ ``knee'' significantly reduced. \Katherine{LHS needs pixel mask somehow}}
+    \label{fig:spectra-comparison}
+\end{figure*}
+
+
+\section{Summary and Discussion}
+\label{sec:discussion}
+
+\Katherine{Summarize the findings in the performance analysis section}
+
+
+In measuring the properties of galaxies in a weak gravitational lensing survey, what we actually measure are the moments of each galaxy image. The first three moments describe the position, size, and shear of the galaxy. Image moments are sensitive to the  underlying image noise; an overall positive noise background would make objects appear on average brighter than they are in reality, causing a bias in their measured size towards larger galaxies. Shear, the second moment of the image, depends on the second derivative of the noise field, or in Fourier space, the power spectrum. Any significant anisotropies in the noise power spectrum resulting from correlated noise would cause significant biases in the measured galaxy shapes in the \textit{Roman} weak lensing survey. We showed in  \Katherine{Laliotis 24} that the correlated read noise from the \textit{Roman} detectors causes a bias in measured galaxy shapes that exceeds mission design requirements. In this paper, we have presented a method to remove that correlated noise, and thus suppress the bias we would expect to see in the WL shape catalog. 
+
+Our correlated noise removal algorithm \texttt{imDestripe} successfully reduced the level of correlated noise in the \textit{Roman} detector lab tests by \Katherine{N}. We expect the implementation of this algorithm, along with the other planned correction schemes involving reference pixels, to significantly reduce the expected galaxy shape bias being caused by correlated noise. We leave the prediction of the new level of noise-induced expected shape bias to future work.
+
+Weak gravitational lensing is one of the most promising methods of advancing our understanding of physical cosmology. By correlating the shapes of pairs of galaxies, and applying a little bit of General Relativity, we can reconstruct the distribution of matter in the universe using this technique. However, weak lensing's accuracy is limited by the number of observed galaxies, meaning very small and very faint objects must not only be measurable, but measurable to high precision. This necessitates in-depth studies investigating potential sources of systematic errors on galaxy measurements, and where significant errors are found, development of strategies to account for them as completely as possible. With \texttt{imDestripe}, we add to the arsenal of \textit{Roman} software serving this purpose, which together will enable the most accurate, complete, and in-depth weak lensing survey ever undertaken. 
+
+\begin{ack}
+ Acknowledgments   
+\end{ack}
+
+\appendix\label{app:codenotes}
+
+\section{Code notes}
+
+\Chris{material for debugging}
+
+I'm putting here a list of routines and what they input/output.
+
+\subsection{furry-parakeet routines}
+
+\noindent{\tt bilinear\_interpolation}: Inputs are
+\begin{list}{$\bullet$}{}
+\item {\tt image}: Input image $\tilde I_{Bj}$
+\item {\tt rows}, {\tt cols}: shape of $\tilde I_{Bj}$; intended shape of $X_{Ai}$
+\item {\tt g\_eff}: Gain image $G_{Bj}$ 
+\item {\tt coords}: the coordinates of pixel $Bj$ in the coordinate system of A. 
+%This is flattened: the ordering is $x_0,y_0,x_1,y_1,x_2,y_2...x_{N-1},y_{N-1}$, where $j=0..N-1$ is the pixel index in the same order as in {\tt image}
+\item {\tt num\_coords}: the length $N$ of the coordinates vector
+\item {\tt interp\_data}: Image of zeroes in the same format as image A ($X_{Ai}$).
+\end{list}
+The function carries out the operation:
+\begin{equation}
+    X_{Ai} = \sum_j w_{Ai;Bj} G_{Bj} \tilde I_{Bj}.
+\end{equation}
+Note that if pixel $i$ is ``out of bounds'' then $X_{Ai}$ is skipped, so this only works if $X_{Ai}$ is initialized to zeros before the function call \Katherine{(it is)}.
+
+\vskip 0.05in
+
+\noindent{\tt bilinear\_transpose}: Inputs are
+\begin{list}{$\bullet$}{}
+\item {\tt image}: Input gradient image $g_{Ai}$ 
+\item {\tt rows}, {\tt cols}: intended shape of $\gamma_{Bj}$ 
+\item {\tt coords}: the coordinates of pixel $Aj$ in the coordinate system of B. 
+%This is flattened: the ordering is $x_0,y_0,x_1,y_1,x_2,y_2...x_{N-1},y_{N-1}$, where $j=0..N-1$ is the pixel index in the same order as in {\tt image}
+\item {\tt num\_coords}: the length $N$ of the coordinates vector
+\item {\tt original\_image}: An image of zeroes in the same format as image B ($I_{B}$).
+\end{list}
+The function carries out the operation:
+\begin{equation}
+    \gamma_{A\to B, j} = \sum_i w_{Ai;Bj} g_{Ai}.
+\end{equation}
+This skips a pixel $j$ if the total weight (denominator) is 0 and does not initialize the numerator internally, so it only works if $\gamma_{Aj}$ is initialized to zeros before the function call \Katherine{(it is)}.
+
+\subsection{Class Methods}
+
+{\tt forward\_par}
+Method of class {\tt parameters}. Inputs are
+\begin{list}{$\bullet$}{}
+\item {\tt j}: Index into params to retrieve a certain set, ie. $j=0\to p_{A}$, $j=1\to p_{B}$
+\end{list}
+
+Carries out the operation
+\begin{equation}
+    P_A = p_{A}{\textbf{1}}^T
+\end{equation}
+returning a $N_{rows}\times N_{cols}$ matrix with values $p_{A\alpha}$ broadcast across rows.
+
+\vskip 0.05in
+
+{\tt subtract\_parameters}
+
+Method of class {\tt sca\_img}. Inputs are
+\begin{list}{$\bullet$}{}
+\item {\tt params}: a parameters object, containing the current working parameters vector
+\item {\tt k}: Index into params to retrieve the right set for the {\tt sca\_img} 
+\end{list}
+
+First the function calls {\tt forward\_par} to make $P_A$. Then it carries out the operation
+\begin{equation}
+    \tilde{I}_B = I_B - P_B
+\end{equation}
+
+\vskip 0.05in
+
+
+\subsection{destripe.py routines}
+
+{\tt transpose\_par}
+ Inputs are
+\begin{list}{$\bullet$}{}
+\item {\tt I}: An array, $N_{rows}\times N_{cols}$
+\end{list}
+
+The function carries out the operation
+\begin{equation}
+    I_i= \sum_{j=0}^{N_{cols}}I_{ij}
+\end{equation}
+
+\vskip 0.05in
+
+\noindent{\tt make\_interpolated}: This is a method of sca class. Inputs are
+\begin{list}{$\bullet$}{}
+\item{\tt sca\_A}: $\tilde{I}_A$, Image A with parameters $p_{A\alpha}$ subtracted and object and permanent masks applied
+\item{\tt ind}: index of $I_A$ within the list of all SCAs in the mosaic
+\item{\tt params}: parameters object with current vector of all parameters for the SCAs, or None if first iteration
+\end{list}
+This function carries out the operation: 
+\begin{equation}
+  \tilde J_{Ai}=\frac{\sum_{\text{ B in A}} X_{Ai}}{{\cal N}_{B|Ai} G_{Ai}}  
+\end{equation}
+\begin{equation}
+  \tilde J_{Ai}=\frac{\sum_{\text{ B in A}} \sum_j w_{Ai;Bj} G_{Bj} \tilde I_{Bj}}{{\cal N}_{B|Ai} G_{Ai}}  
+\end{equation}
+
+Where the $X_{Ai}$ is an the image-A-grid interpolations of a given image B, which we compute and add into $\tilde J_{Ai}$ only if B overlaps A.
+
+Process:
+\begin{enumerate}
+\item For image Bs overlapping image A: initialize $I_B$ and add SCA B noise
+\item If params is defined, {\tt subtract\_parameters} for params and index {\tt k} of $I_B$ to get $\tilde{I}_B$
+\item Apply bad pixel mask to $\tilde{I}_B$
+\item Initialize array of zeros for $\tilde{X}_A$ and $\tilde{J}_A$
+\item {\tt interpolate\_image\_bilinear} $\tilde{I}_B$ and its permanent mask onto the coordinate system of $I_A$, resulting in $\tilde{X}_A$ for the image and mask
+\item Add each $\tilde{X}_A$ to a cumulative interpolation image and a cumulative ${\cal N}_{B|Ai}$ 
+\item Once all SCAs overlapping $I_A$ have been accounted for, divide by ${\cal N}_{B|Ai}$ and $G_A$ (see eq. A3).
+\end{enumerate}
+
+\vskip 0.05in
+
+\noindent{\tt cost\_function}: Inputs are
+\begin{list}{$\bullet$}{}
+\item {\tt p}: vector of current de-striping parameters $p$. Initializes to an array of zeroes with shape $(N_{SCAs}, N_{rows})$
+\item {\tt f}: functional form of the cost function, currently $f(x)=x^2$
+\end{list}
+
+% The function carries out the operation: 
+% \begin{equation}
+%     \epsilon=\sum_{A=0}^{N_{SCA}} \sum_{i,}f(\Psi_{Ai})
+% \end{equation}
+% where $\Psi_{Ai}$ is computed as $\Psi_{A}=\tilde{J}_A-\tilde{I}_A$. 
+
+Process: For each SCA,
+\begin{enumerate}
+    \item Initialize SCA image $I_A$, add noise, make/apply object mask
+    \item Get $\tilde I_A$ via {\tt subtract\_parameters} with $p_A$ 
+    \item Re-apply $I_A$ masks to set objects, bad pixels to zero
+    \item Get $\tilde J_A$ via $I_A$.{\tt make\_interpolated}, then apply the same image A masks
+    \item Subtract $ \tilde I_A - \tilde J_A$ (for nonzero pixels) to obtain $\Psi_A$; update in $\Psi$ (the stack of $N_{SCA}$ $\Psi_A$s)
+    \item Compute the local cost function $\epsilon_A = \sum_{ij}f(\Psi_{Aij})$
+\end{enumerate}
+Finally, calculate the total cost $\epsilon_T=\sum_A\epsilon_A$.
+
+The function returns
+\begin{equation}
+\epsilon_T = \sum_A\sum_{ij}f(\Psi_{Aij}) = \sum_A\sum_{ij}f(\tilde I_{Aij} - \tilde J_{Aij})
+\end{equation}
+and
+\begin{equation}
+    \Psi = \tilde I - \tilde J
+\end{equation}
+
+
+
+\vskip 0.05in
+
+\noindent{\tt residual\_function}: The gradient of the cost function w/r to parameters. Inputs are
+\begin{list}{$\bullet$}{}
+\item {\tt $\Psi$}: The vector of difference images ($\tilde{I}_A-\tilde{J}_A$) for each SCA
+\item {\tt f'}: functional form of the derivative of the cost function, currently $f(x)=2x$
+\end{list}
+
+Process: For each SCA,
+\begin{enumerate}
+    \item Calculate the derivative $g_A=f'(\Psi_A)$
+    \item Sum up the value of $g_A$ across rows using {\tt transpose\_par} to get $t_{1A}$, an $N_{rows}$ vector representing the first term in $r_A = \nabla_{p_A}\epsilon_A$
+    \item Un-normalize the gradient image to prepare for transpose interpolation, $g_A/(G_A{\cal N}_{B|Ai})$
+    \item For overlapping SCA Bs:
+    \begin{enumerate}
+        \item Initialize $I_B$
+        \item Initialize a transpose interpolated gradient $\gamma_B=0$
+        \item Use {\tt transpose\_interpolate} to get $\gamma_{A\to B, J}$ from $g_A$, and multiply by $G_B$
+        \item Sum up the values of $\gamma_{A\to B, j}$ over rows using {\tt transpose\_par} to get $t_{2B}$, an $N_{rows}$ vector
+        \item Add $t_{2B}$ to $r_B$
+    \end{enumerate}
+    \item Subtract $t_{1A}$ from $r_A$
+    \item return $r$ ($N_{SCA}\times N_{rows}$)
+\end{enumerate}
+
+
+In summary, the function carries out the operation
+\begin{equation}
+    r_{A} = - \sum_i g_{Ai} \delta_{\alpha i} 
+     + \sum_{B}\sum_j \gamma_{B \to A,j} G_{Bj} \delta_{\alpha j}
+\end{equation}
+summing up values across rows so that the resultant residual vector has $N_{rows}$ values per SCA. 
+
+%\Katherine{I know this notation is confusing... $g_A$ is the gradient of A in A coords, $\gamma_A$ is the gradient of A in B coords. So for each image B that overlaps our image A, we add that image gradient but interpolated onto image A grid. So the second term above has index B but it's in A coords. Any ideas to make the notaiton make sense would be appreciated!!}
+
+Expanding out:
+\begin{equation}
+    r_{\alpha,A} = - \sum_i f'(\Psi_{Ai}) \delta_{\alpha, Ai} 
+     + \sum_{B} \Bigg[\sum_{j} \frac{ \sum_i w_{Ai;Bj} f'(\Psi_{Ai})}{G_{Ai}{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Bigg]
+\end{equation}
+
+\begin{equation}
+    r_{\alpha,A} = - \sum_i f'(\tilde I_{Ai} - \tilde J_{Ai}) \delta_{\alpha, Ai} 
+     + \sum_{B} \Bigg[\sum_{j} \frac{\sum_i w_{Ai;Bj} f'(\tilde I_{Ai} - \tilde J_{Ai})}{G_A{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Bigg]
+\end{equation}
+
+\begin{equation}
+    r_\alpha = \sum_A \Bigg\{ - \sum_i f'(\tilde I_{Ai} - \tilde J_{Ai}) \delta_{\alpha, Ai} 
+     + \sum_{B} \Big[\sum_{j} \frac{\sum_i w_{Ai;Bj} f'(\tilde I_{Ai} - \tilde J_{Ai})}{G_A{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Big]\Bigg\}
+\end{equation}
+
+
+\vskip 0.05in
+
+\noindent{\tt linear\_search}: Search via bisection for the optimal parameters along a given direction. Inputs are
+\begin{list}{$\bullet$}{}
+\item {\tt p}: parameters vector
+\item {\tt d}: direction in which to search
+\item {\tt f}: functional form for cost function
+\item{\tt f'}: derivative of f
+\item {\tt n\_iter}: max number of LS iterations to go through
+\item{\tt tol}: maximum search range width to cause convergence
+\end{list}
+
+The algorithm starts by calculating an initial value of the cost function $\epsilon_{0}(\textbf{p})$ and the difference images $\Psi$ given the starting parameters vector $\textbf{p}$. We also define an initial range of parameter space for $\lambda$, the depth of direction step, to search. Then for each iteration $k$,
+\begin{enumerate}
+    \item Set the value of $\lambda_{test} = 1/2(\lambda_{max}-\lambda_{min})$
+    \item Update the parameters by adding a step of $\lambda_{test} * d_{alpha}$ to the initial parameters; $p_{\alpha,k}=p_{\alpha,0}+\lambda_{test}*d_{\alpha}$
+    \item Re-calculate $\epsilon$, $\Psi$, and $r_{\alpha}$ using the working parameters $p_{\alpha, k}$ into {\tt cost\_function} and {\tt residual\_function} 
+    \item If $\epsilon_k<\epsilon_{k-1}$, save the current parameters $p_k$ as the ``best'' parameters.
+    \item Calculate $d\epsilon_k / d\lambda = r_{\alpha,k} \cdot -d_{\alpha}$, and either
+    \begin{enumerate}
+        \item set $\alpha_{min}$ or $\alpha_{max}$ $=\alpha_{test}$ for negative or positive derivatives, respectively
+        \item or stop iterating if $d\epsilon_k / d\lambda=0$ and return the current ``best'' parameters.
+    \end{enumerate}
+\end{enumerate}
+
+\vskip 0.05in
+
+\noindent{\tt conjugate\_gradient}:
+Use method of conjugate gradient descent to optimize destriping parameters. Inputs are
+\begin{list}{$\bullet$}{}
+    \item {\tt p}: a parameters object, initially with all parameters set to zero
+    \item {\tt f, f'}: cost function form and its derivative
+    \item {\tt tol}: Tolerance level; if the norm of the gradient reaches this value, say the solution has converged
+    \item {\tt max\_iter}: Maximum CG iterations to go through before stopping, even if not converged
+\end{list}
+
+Algorithm:
+For iterations $k$,
+\begin{enumerate}
+    \item Calculate the initial cost $\epsilon_k$ and difference image $\Psi_k$ using {\tt cost\_function($p_k$,f)}
+    \item\label{iter} Calculate the gradient $g_k$ using {\tt residual\_function} of $\Psi_k$
+    \item Calculate $n_k$, the vector norm of $g_k$, and 
+    \begin{enumerate}
+        \item for iteration $k=0$: set $n=n_0$, tol$=n_0*$tol, and direction $d_0=-g_0$
+        \item for all other iterations: calculate $\beta=|g_k|^2/|g_{k-1}|^2$, and set $d_k=-g_k+\beta_k d_{k-1}$
+    \end{enumerate}
+    \item Find best possible new parameters $p_{k+1}$ and get the corresponding difference image $\Psi_{k+1}$ using {\tt linear\_search} in the direction $d_k$ with parameters $p_k$
+    \item Make updates: $p_{k+1}\to p_k$, $\Psi_{k+1}\to\Psi_k$, $g_k\to g_{k-1}$, $d_k\to d_{k-1}$
+    \item If convergence or maximum iterations are reached, finalize the parameters $p$. Otherwise,
+    \item return to Item \ref{iter} and repeat the process until either convergence or maximum iterations.
+\end{enumerate}
+
+
+ \begin{thebibliography}{}%%% references
+ 
+\bibitem[Givans et al.(2022)]{Givans2022} Givans, J.~J., Choi, A., Porredon, A., et al.\ 2022, \pasp, 134, 1031, 014001. doi:10.1088/1538-3873/ac46ba
+
+\bibitem[Plazas Malag{\'o}n et al.(2024)]{PlazasMalagon2024} Plazas Malag{\'o}n, A.~A., Shapiro, C., Choi, A., et al.\ 2024, Journal of Instrumentation, 19, 3, P03015. doi:10.1088/1748-0221/19/03/P03015
+
+\bibitem[Paine et al.(2025)]{Paine2025} Paine, J., Choi, A., Merchant, C., et al.\ 2025, AAS, 245, 305.12. 
+
+\bibitem[Choi \& Hirata(2020)]{Choi2020} Choi, A. \& Hirata, C.~M.\ 2020, \pasp, 132, 1007, 014502. doi:10.1088/1538-3873/ab4504
+
+\bibitem[Laliotis et al.(2024)]{Laliotis2024} Laliotis, K., Macbeth, E., Hirata, C.~M., et al.\ 2024, \pasp, 136, 12, 124506. doi:10.1088/1538-3873/ad9bec
+
+\bibitem[Schlawin et al.(2020)]{Schlawin2020} Schlawin, E., Leisenring, J., Misselt, K., et al.\ 2020, \aj, 160, 5, 231. doi:10.3847/1538-3881/abb811
+
+\bibitem[Betti et al.(2024)]{Betti2024}
+Betti, S.~K., Casertano, S., Brandt, T., Cosentino, R., Desjardins, T., \& Sánchez, J. 2024, \emph{Application and Characterization of IRRC on Roman/WFI TVAC1 Data}, Technical Report Roman‑STScI‑000673 (SE‑01), release 21 October 2024, Space Telescope Science Institute
+
+\bibitem[Mosby et al.(2020)]{Mosby2020} Mosby, G., Rauscher, B.~J., Bennett, C., et al.\ 2020, Journal of Astronomical Telescopes, Instruments, and Systems, 6, 046001. doi:10.1117/1.JATIS.6.4.046001
+
+\bibitem[Akeson et al.(2019)]{Akeson2019} Akeson, R., Armus, L., Bachelet, E., et al.\ 2019, , arXiv:1902.05569. doi:10.48550/arXiv.1902.05569
+
+\bibitem[Spergel et al.(2015)]{Spergel2015} Spergel, D., Gehrels, N., Baltay, C., et al.\ 2015, , arXiv:1503.03757. doi:10.48550/arXiv.1503.03757
+
+\bibitem[Weinberg et al.(2013)]{Weinberg2013} Weinberg, D.~H., Mortonson, M.~J., Eisenstein, D.~J., et al.\ 2013, \physrep, 530, 2, 87. doi:10.1016/j.physrep.2013.05.001
+
+\bibitem[Mandelbaum(2018)]{Mandelbaum2018} Mandelbaum, R.\ 2018, \araa, 56, 393. doi:10.1146/annurev-astro-081817-051928
+
+\bibitem[Keih{\"a}nen et al.(2004)]{Keihanen2004} Keih{\"a}nen, E., Kurki-Suonio, H., Poutanen, T., et al.\ 2004, \aap, 428, 287. doi:10.1051/0004-6361:200400060
+
+\bibitem[Delabrouille(1998)]{Delabrouille1998} Delabrouille, J.\ 1998, \aaps, 127, 555. doi:10.1051/aas:1998119
+
+\bibitem[Sutton et al.(2009)]{Sutton2009} Sutton, D., Johnson, B.~R., Brown, M.~L., et al.\ 2009, \mnras, 393, 3, 894. doi:10.1111/j.1365-2966.2008.14195.x
+
+\bibitem[OpenUniverse et al.(2025)]{OpenUniverse2025} OpenUniverse, The LSST Dark Energy Science Collaboration, The Roman HLIS Project Infrastructure Team, et al.\ 2025, , arXiv:2501.05632. doi:10.48550/arXiv.2501.05632
+
+\bibitem[Troxel et al.(2023)]{Troxel2023} Troxel, M.~A., Lin, C., Park, A., et al.\ 2023, \mnras, 522, 2, 2801. doi:10.1093/mnras/stad664
+
+\bibitem[Cao et al.(2025)]{Cao2025} Cao, K., Hirata, C.~M., Laliotis, K., et al.\ 2025, \apjs, 277, 2, 55. doi:10.3847/1538-4365/adb580
+
+\bibitem[Rauscher et al.(2022)]{Rauscher2022} Rauscher, B.~J., Fixsen, D.~J., \& Mosby, G.\ 2022, Journal of Astronomical Telescopes, Instruments, and Systems, 8, 028002. doi:10.1117/1.JATIS.8.2.028002
+
+
+ \end{thebibliography}
+
+\end{document}
+
