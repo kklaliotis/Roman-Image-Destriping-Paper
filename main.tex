@@ -416,30 +416,38 @@ successfully reduced the level of correlated noise in the \textit{Roman} detecto
 
 \texttt{imDestripe} was designed as part of efforts by the Roman High Latitude Imaging Survey (HLIS) Project Infrastructure Team (PIT) to design infrastructure for measuring cosmological parameters with \textit{Roman} data. The PIT image processing pipeline will now include \texttt{imDestripe} as a processing step before images are passed to \textsc{PyIMCOM} for image coaddition. With \texttt{imDestripe}, we add to the arsenal of \textit{Roman} software serving not just the HLIS PIT but the astronomy community as a whole; \texttt{imDestripe} and all aspects of the PIT cosmology pipeline are open source code on GitHub, and the images and data products derived through application of this pipeline will be world public as well. 
 
-% \begin{ack}
-%  Acknowledgments   
-% \end{ack}
+\begin{ack}
+ This work was supported by the NASA ROSES grant 22-ROMAN11-0011, contract number 80NM0024F0012, via a JPL subaward. 
+ 
+ This paper is based on data acquired at the Detector Characterization Laboratory at NASA Goddard Space Flight Center.
+
+ 
+Computations were performed on the Cardinal cluster at
+the Ohio Supercomputer Center \citep{OSC}.
+\end{ack}
 
 \appendix
 
 \section{Implementation notes}
 \label{app:codenotes}
 
-This appendix describes the implementation of \texttt{imDestripe}, and serves as a guide to the various functions.
-\Katherine{Cleaned up a little, check if OK}
-%\Chris{may need a small amount of cleaning up}
+This appendix describes the implementation of \texttt{imDestripe}, and serves as a guide to the various functions. There are two sets of functions: those in the C layer of the code ({\tt furry-parakeet}\footnote{\url{https://github.com/Roman-HLIS-Cosmology-PIT/furry-parakeet}}) and those in the Python layer ({\tt pyimcom}\footnote{\url{https://github.com/Roman-HLIS-Cosmology-PIT/pyimcom}}).
 
-\subsection{furry-parakeet routines}
+\subsection{C routines}
 
-\noindent{\tt bilinear\_interpolation} \\ Takes inputs: 
+The C routines are in the {\tt furry-parakeet} repository. These are functions that were difficult to build in an efficient way using standard vectorization with Python. They perform forward and transpose interpolation; the latter is needed for computing gradients of the cost function, and is most similar to the ``cloud-in-cell'' operator used in $N$-body simulations (e.g., \cite{Eastwood1974}).
+
+\vskip 0.1in
+
+\noindent{\tt bilinear\_interpolation}: This function takes inputs: 
 \begin{list}{$\bullet$}{}
-\item {\tt image}: Input image $\tilde I_{Bj}$
-\item {\tt rows}, {\tt cols}: shape of $\tilde I_{Bj}$; intended shape of $X_{Ai}$
-\item {\tt g\_eff}: Gain image $G_{Bj}$ 
-\item {\tt coords}: the coordinates of pixel $Bj$ in the coordinate system of A. 
+\item {\tt image}: the input image $\tilde I_{Bj}$.
+\item {\tt rows}, {\tt cols}: the shape of $\tilde I_{Bj}$, and the intended shape of $X_{Ai}$.
+\item {\tt g\_eff}: the gain image $G_{Bj}$ .
+\item {\tt coords}: the coordinates of pixel $Bj$ in the coordinate system of image $A$. 
 %This is flattened: the ordering is $x_0,y_0,x_1,y_1,x_2,y_2...x_{N-1},y_{N-1}$, where $j=0..N-1$ is the pixel index in the same order as in {\tt image}
-\item {\tt num\_coords}: the length $N$ of the coordinates vector
-\item {\tt interp\_data}: Image of zeroes in the same format as image A ($X_{Ai}$).
+\item {\tt num\_coords}: the length $N$ of the coordinates vector.
+\item {\tt interp\_data}: an image of zeroes in the same format as image $A$ ($X_{Ai}$); this is filled in in place.
 \end{list}
 The function carries out the operation:
 \begin{equation}
@@ -447,16 +455,16 @@ The function carries out the operation:
 \end{equation}
 Note that if pixel $i$ is ``out of bounds'' then $X_{Ai}$ is skipped, so  $X_{Ai}$ is initialized to zeros before the function call.
 
-\vskip 0.05in
+\vskip 0.1in
 
-\noindent{\tt bilinear\_transpose}: \\ Takes inputs: 
+\noindent{\tt bilinear\_transpose}: This function takes inputs: 
 \begin{list}{$\bullet$}{}
-\item {\tt image}: Input gradient image $g_{Ai}$ 
-\item {\tt rows}, {\tt cols}: intended shape of $\gamma_{Bj}$ 
-\item {\tt coords}: the coordinates of pixel $Aj$ in the coordinate system of B. 
+\item {\tt image}: the input gradient image $g_{Ai}$ .
+\item {\tt rows}, {\tt cols}: the intended shape of $\gamma_{Bj}$.
+\item {\tt coords}: the coordinates of pixel $Aj$ in the coordinate system of $B$. 
 %This is flattened: the ordering is $x_0,y_0,x_1,y_1,x_2,y_2...x_{N-1},y_{N-1}$, where $j=0..N-1$ is the pixel index in the same order as in {\tt image}
-\item {\tt num\_coords}: the length $N$ of the coordinates vector
-\item {\tt original\_image}: An image of zeroes in the same format as image B ($I_{B}$).
+\item {\tt num\_coords}: the length $N$ of the coordinates vector.
+\item {\tt original\_image}: an image of zeroes in the same format as image B ($I_{B}$); this is filled in in place.
 \end{list}
 The function carries out the operation:
 \begin{equation}
@@ -464,169 +472,171 @@ The function carries out the operation:
 \end{equation}
 This skips a pixel $j$ if the total weight (denominator) is 0 and does not initialize the numerator internally, so $\gamma_{Aj}$ is initialized to zeros before the function call.
 
-\subsection{Class Methods}
+\subsection{Methods of the {\tt Parameters} class}
 
-{\tt forward\_par}
-(method of class {\tt parameters}). \\ Takes inputs: 
+The following methods are part of the {\tt pyimcom.imDestripe. Parameters} class.
+
+\vskip 0.1in
+
+\noindent{\tt forward\_par}
+(method of class {\tt parameters}): This method takes inputs: 
 \begin{list}{$\bullet$}{}
-\item {\tt j}: Index into params to retrieve a certain set, ie. $j=0\to p_{A}$, $j=1\to p_{B}$
+\item {\tt j}: an index  to retrieve a certain parameter from {\tt params}, e.g., $j=0\to p_{A}$, $j=1\to p_{B}$.
 \end{list}
-
-Carries out the operation
+It carries out the operation
 \begin{equation}
-    P_A = p_{A}{\textbf{1}}^T
+    P_A = p_{A}{\textbf{1}}^{\rm T},
 \end{equation}
 returning a $N_{rows}\times N_{cols}$ matrix with values $p_{A\alpha}$ broadcast across rows.
 
 \vskip 0.1in
 
-{\tt subtract\_parameters} (ethod of class {\tt sca\_img}). \\ Takes inputs: 
+\noindent{\tt subtract\_parameters} (method of class {\tt sca\_img}): This method takes inputs: 
 \begin{list}{$\bullet$}{}
-\item {\tt params}: parameters object, containing the current working parameters vector
-\item {\tt k}: Index into params to retrieve the right set for the {\tt sca\_img} 
+\item {\tt params}: a parameters object, containing the current working parameters vector.
+\item {\tt k}: an index for {\tt params} to retrieve the right set for the {\tt sca\_img}.
 \end{list}
-
 First the function calls {\tt forward\_par} to make $P_A$. Then it carries out the operation
 \begin{equation}
-    \tilde{I}_B = I_B - P_B
+    \tilde{I}_B = I_B - P_B.
 \end{equation}
 
-\vskip 0.05in
+\subsection{Functions in {\tt imDestripe.py}}
 
-\subsection{imdestripe.py routines}
+The following functions are in the {\tt pyimcom.imDestripe} module.
 
-{\tt transpose\_par} \\ Takes inputs: 
+\vskip0.1in
+
+\noindent{\tt transpose\_par}: This function takes inputs: 
 \begin{list}{$\bullet$}{}
-\item {\tt I}: An array, $N_{rows}\times N_{cols}$
+\item {\tt I}: an array, $N_{rows}\times N_{cols}$.
 \end{list}
-
 The function carries out the operation
 \begin{equation}
-    I_i= \sum_{j=0}^{N_{cols}}I_{ij}
+    I_i= \sum_{j=0}^{N_{cols}}I_{ij}.
 \end{equation}
 
 \vskip 0.1in
 
-\noindent{}{\tt make\_interpolated} (method of class {\tt sca\_img}) \\ Takes inputs: 
+\noindent{}{\tt make\_interpolated} (method of class {\tt sca\_img}): This function takes inputs: 
 \begin{list}{$\bullet$}{}
-\item{\tt sca\_A}: $\tilde{I}_A$, Image A with parameters $p_{A\alpha}$ subtracted and object and permanent mask applied
-\item{\tt ind}: index of $I_A$ within the list of all SCAs in the mosaic
-\item{\tt params}: parameters object with the current vector of all parameters for the SCAs, or None if first iteration
+\item{\tt sca\_A}: $\tilde{I}_A$, Image A with parameters $p_{A\alpha}$ subtracted and object and permanent mask applied.
+\item{\tt ind}: the index of $I_A$ within the list of all SCAs in the mosaic.
+\item{\tt params}: a parameters object with the current vector of all parameters for the SCAs, or None if first iteration.
 \end{list}
 This function carries out the operation: 
 \begin{equation}
   \tilde J_{Ai}=\frac{\sum_{\text{ B in A}} X_{Ai}}{{\cal N}_{B|Ai} G_{Ai}}  
+=\frac{\sum_{\text{ B in A}} \sum_j w_{Ai;Bj} G_{Bj} \tilde I_{Bj}}{{\cal N}_{B|Ai} G_{Ai}}  ,
 \end{equation}
-\begin{equation}
-  \tilde J_{Ai}=\frac{\sum_{\text{ B in A}} \sum_j w_{Ai;Bj} G_{Bj} \tilde I_{Bj}}{{\cal N}_{B|Ai} G_{Ai}}  
-\end{equation}
+where $X_{Ai}$ is the image $A$ grid interpolation of a given image $B$, which we compute and add into $\tilde J_{Ai}$ only if $B$ overlaps $A$.
 
-Where $X_{Ai}$ is the image-A-grid interpolation of a given image B, which we compute and add into $\tilde J_{Ai}$ only if B overlaps A.
+\vskip0.05in
 
-\noindent{}The function carries out the process:
+\noindent{}The specific algorithm used is:
 \begin{enumerate}
-\item For images B that overlap image A: initialize $I_B$ and add the proper noise frame
-\item If params is defined, {\tt subtract\_parameters} to get $\tilde{I}_B$
-\item Apply pixel mask to $\tilde{I}_B$
-\item Initialize array of zeros for $\tilde{X}_A$ and $\tilde{J}_A$
-\item {\tt interpolate\_image\_bilinear} $\tilde{I}_B$ and its permanent mask onto the coordinate system of $I_A$, resulting in $\tilde{X}_A$ for the image and mask
-\item Add each $\tilde{X}_A$ to a cumulative interpolation image and a cumulative ${\cal N}_{B|Ai}$ 
-\item Once all SCAs overlapping $I_A$ have been accounted for, divide by ${\cal N}_{B|Ai}$ and $G_A$ (see eq. A3).
+\item For the images $B$ that overlap image $A$: initialize $I_B$ and add the proper noise frame.
+\begin{enumerate}
+\item If {\tt params} is defined, call {\tt subtract\_parameters} to get $\tilde{I}_B$.
+\item Apply the pixel mask to $\tilde{I}_B$.
+\item Initialize an array of zeros for $\tilde{X}_A$ and $\tilde{J}_A$.
+\item Apply {\tt interpolate\_image\_bilinear} to $\tilde{I}_B$ and its permanent mask onto the coordinate system of $I_A$, resulting in $\tilde{X}_A$ for the image and mask.
+\item Add each $\tilde{X}_A$ to a cumulative interpolation image and a cumulative ${\cal N}_{B|Ai}$. 
+\end{enumerate}
+\item Once all SCAs overlapping $I_A$ have been accounted for, divide by ${\cal N}_{B|Ai}$ and $G_A$.
 \end{enumerate}
 
 \vskip 0.1in
 
-\noindent{\tt cost\_function}: \\ Takes inputs: 
+\noindent{\tt cost\_function}: This function takes inputs: 
 \begin{list}{$\bullet$}{}
-\item {\tt p}: vector of current de-striping parameters $p$. Initializes to an array of zeroes with shape $(N_{SCAs}, N_{rows})$
-\item {\tt f}: functional form of the cost function, currently $f(x)=x^2$
+\item {\tt p}: a vector of current de-striping parameters $p$. Initializes to an array of zeroes with shape $(N_{SCAs}, N_{rows})$.
+\item {\tt f}: the functional form of the cost function, currently $f(x)=x^2$.
 \end{list}
 
-
-\noindent{}The function carries out the process: \\
-For each SCA,
+The function carries out the following algorithm:
 \begin{enumerate}
-    \item Initialize SCA image $I_A$, add noise, make (if iteration 1) or apply object mask
-    \item Get $\tilde I_A$ via {\tt subtract\_parameters} with $p_A$ 
-    \item Re-apply $I_A$ masks to set bright objects and bad pixels to zero
-    \item Get $\tilde J_A$ via $I_A$.{\tt make\_interpolated}, then apply the same image A masks
-    \item Subtract $ \tilde I_A - \tilde J_A$ (for nonzero pixels) to obtain $\Psi_A$; update in $\Psi$ (the stack of $N_{SCA}$ $\Psi_A$s)
-    \item Compute the local cost function $\epsilon_A = \sum_{ij}f(\Psi_{Aij})$
+\item For each SCA $A$:
+\begin{enumerate}
+    \item Initialize SCA image $I_A$, add noise, make (if iteration 1) or apply object mask.
+    \item Get $\tilde I_A$ via {\tt subtract\_parameters} with $p_A$.
+    \item Re-apply $I_A$ masks to set bright objects and bad pixels to zero.
+    \item Get $\tilde J_A$ via $I_A$.{\tt make\_interpolated}, then apply the same image $A$ masks.
+    \item Subtract $ \tilde I_A - \tilde J_A$ (for nonzero pixels) to obtain $\Psi_A$; update in $\Psi$ (the stack of $N_{SCA}$ $\Psi_A$s).
+    \item Compute the local cost function $\epsilon_A = \sum_{ij}f(\Psi_{Aij})$.
 \end{enumerate}
-Finally, calculate the total cost by summing over SCAs: $\epsilon_T=\sum_A\epsilon_A$.
-
-\vskip 0.05in
-\noindent{}The function returns:\\
+\item Finally, calculate the total cost by summing over SCAs: $\epsilon_T=\sum_A\epsilon_A$.
+\end{enumerate}
+The function returns:
 \begin{equation}
 \epsilon_T = \sum_A\sum_{ij}f(\Psi_{Aij}) = \sum_A\sum_{ij}f(\tilde I_{Aij} - \tilde J_{Aij})
 \end{equation}
 and
 \begin{equation}
-    \Psi = \tilde I - \tilde J
+    \Psi = \tilde I - \tilde J.
 \end{equation}
-
 
 \vskip 0.1in
 
-\noindent{\tt residual\_function}
-%: The gradient of the cost function with respect to the parameters.
-\\Takes inputs: 
-\begin{list}{$\bullet$}{}
-\item {\tt $\Psi$}: The vector of difference images ($\tilde{I}_A-\tilde{J}_A$) for each SCA
-\item {\tt f'}: functional form of the derivative of the cost function, currently $f(x)=2x$
-\end{list}
+\noindent{\tt residual\_function}:
 
-\noindent{}The function carries out the process:\\
-For each SCA,
+This function takes inputs: 
+\begin{list}{$\bullet$}{}
+\item {\tt $\Psi$}: the vector of difference images ($\tilde{I}_A-\tilde{J}_A$) for each SCA.
+\item {\tt f'}: the functional form of the derivative of the cost function. This is currently $f'(x)=2x$ since the quadratic cost function is $f(x)=x^2$.
+\end{list}
+The function carries out the algorithm:
 \begin{enumerate}
-    \item Calculate the derivative $g_A=f'(\Psi_A)$
-    \item Sum up the value of $g_A$ across rows using {\tt transpose\_par} to get $t_{1A}$, an $N_{rows}$ vector representing the first term in $r_A = \nabla_{p_A}\epsilon_A$
-    \item Un-normalize the gradient image to prepare for transpose interpolation, $g_A/(G_A{\cal N}_{B|Ai})$
+\item For each SCA $A$:
+\begin{enumerate}
+    \item Calculate the derivative $g_A=f'(\Psi_A)$.
+    \item Sum up the value of $g_A$ across rows using {\tt transpose\_par} to get $t_{1A}$, an $N_{rows}$ vector representing the first term in $r_A = \nabla_{p_A}\epsilon_A$.
+    \item Un-normalize the gradient image to prepare for transpose interpolation, $g_A/(G_A{\cal N}_{B|Ai})$.
     \item For overlapping SCA image ``B''s:
     \begin{enumerate}
-        \item Initialize $I_B$
-        \item Initialize a transpose interpolated gradient $\gamma_B=0$
-        \item Use {\tt transpose\_interpolate} to get $\gamma_{A\to B, J}$ from $g_A$, and multiply by $G_B$
-        \item Sum up the values of $\gamma_{A\to B, j}$ over rows using {\tt transpose\_par} to get $t_{2B}$, an $N_{rows}$ vector
-        \item Add $t_{2B}$ to $r_B$
+        \item Initialize $I_B$.
+        \item Initialize a transpose interpolated gradient $\gamma_B=0$.
+        \item Use {\tt transpose\_interpolate} to get $\gamma_{A\to B, J}$ from $g_A$, and multiply by $G_B$.
+        \item Sum up the values of $\gamma_{A\to B, j}$ over rows using {\tt transpose\_par} to get $t_{2B}$, an $N_{rows}$ vector.
+        \item Add $t_{2B}$ to $r_B$.
     \end{enumerate}
-    \item Subtract $t_{1A}$ from $r_A$
-    \item Return $r$ ($N_{SCA}\times N_{rows}$)
+    \item Subtract $t_{1A}$ from $r_A$.
+\end{enumerate}
+\item Return the full residual matrix $r$ ($N_{SCA}\times N_{rows}$).
 \end{enumerate}
 
-
-\noindent{} In summary, the function carries out the operation:
+\noindent{}In summary, the function carries out the operation:
 \begin{equation}
-    r_{A} = - \sum_i g_{Ai} \delta_{\alpha i} 
-     + \sum_{B}\sum_j \gamma_{B \to A,j} G_{Bj} \delta_{\alpha j}
+    r_{\alpha, A} = - \sum_i g_{Ai} \delta_{\alpha i} 
+     + \sum_{B}\sum_j \gamma_{B \to A,j} G_{Bj} \delta_{\alpha j},
 \end{equation}
-, summing up values across rows so that the resultant residual vector has $N_{rows}$ values per SCA. 
-
+summing up values across rows so that the resultant residual vector has $N_{rows}$ values per SCA. 
+\vskip 0.05in
 %\Katherine{I know this notation is confusing... $g_A$ is the gradient of A in A coords, $\gamma_A$ is the gradient of A in B coords. So for each image B that overlaps our image A, we add that image gradient but interpolated onto image A grid. So the second term above has index B but it's in A coords. Any ideas to make the notation make sense would be appreciated!!}
-
-Expanding out:
+Expanding out the operations:
 \begin{multline}
     r_{\alpha,A} = - \sum_i f'(\Psi_{Ai}) \delta_{\alpha, Ai} \\
-     + \sum_{B} \Bigg[\sum_{j} \frac{ \sum_i w_{Ai;Bj} f'(\Psi_{Ai})}{G_{Ai}{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Bigg]
+     + \sum_{B} \Bigg[\sum_{j} \frac{ \sum_i w_{Ai;Bj} f'(\Psi_{Ai})}{G_{Ai}{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Bigg].
 \end{multline}
 
-\begin{multline}
-    r_{\alpha,A} = - \sum_i f'(\tilde I_{Ai} - \tilde J_{Ai}) \delta_{\alpha, Ai} \\
-     + \sum_{B} \Bigg[\sum_{j} \frac{\sum_i w_{Ai;Bj} f'(\tilde I_{Ai} - \tilde J_{Ai})}{G_A{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Bigg]
-\end{multline}
+% \Chris{commented out the other formulas since even though they are useful they aren't specifically what this function does}
+
+%\begin{multline}
+%    r_{\alpha,A} = - \sum_i f'(\tilde I_{Ai} - \tilde J_{Ai}) \delta_{\alpha, Ai} \\
+%     + \sum_{B} \Bigg[\sum_{j} \frac{\sum_i w_{Ai;Bj} f'(\tilde I_{Ai} - \tilde J_{Ai})}{G_A{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Bigg]
+%\end{multline}
 
 
-\begin{multline}
-    r_\alpha = \sum_A \Bigg\{ - \sum_i f'(\tilde I_{Ai} - \tilde J_{Ai}) \delta_{\alpha, Ai} \\
-     + \sum_{B} \Big[\sum_{j} \frac{\sum_i w_{Ai;Bj} f'(\tilde I_{Ai} - \tilde J_{Ai})}{G_A{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Big]\Bigg\}
-\end{multline}
-
+%\begin{multline}
+%    r_\alpha = \sum_A \Bigg\{ - \sum_i f'(\tilde I_{Ai} - \tilde J_{Ai}) \delta_{\alpha, Ai} \\
+%     + \sum_{B} \Big[\sum_{j} \frac{\sum_i w_{Ai;Bj} f'(\tilde I_{Ai} - \tilde J_{Ai})}{G_A{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Big]\Bigg\}
+%\end{multline}
 
 \vskip 0.1in
 
-\noindent{\tt linear\_search}
+\noindent{\tt linear\_search}:
 %: Search via bisection for the optimal parameters along a given direction.
-\\Takes inputs: 
+This function takes inputs: 
 \begin{list}{$\bullet$}{}
 \item {\tt p}: current parameters vector
 \item {\tt d}: direction in which to search
@@ -635,17 +645,16 @@ Expanding out:
 \item{\tt f'}: derivative of f
 \end{list}
 
-\noindent{}The function carries out the process:
+\noindent{}The function carries out the algorithm:
 \begin{enumerate}
-    \item Calculate the current $d\epsilon/d\alpha$ = $r\cdot d$
-    \item Find a test value for $\alpha$ based on curvature: $\alpha_{\text{test}}=-0.1 \frac{d\epsilon/ d\alpha}{\|\texttt{d}\|} $ and set the min and max $\alpha$ to $1\times10^{-4}$ and $10\times$ this value, respectively
+    \item Calculate the current $d\epsilon/d\alpha$ = $r\cdot d$,
+    \item Find a test value for $\alpha$ based on curvature: $\alpha_{\text{test}}=-0.1 \frac{d\epsilon/ d\alpha}{\|\texttt{d}\|} $ and set the min and max $\alpha$ to $1\times10^{-4}$ and $10\times$ this value, respectively.
     \item Update a test set of parameters to $p_{\text{test}}=p+\alpha_{\text{max}}d$
-    \item Calculate the cost function and residual for this test set of parameters
-    \item Directly calculate the direction step that minimizes the derivative of the cost function: $\alpha_{\text{new}} = \frac{-\alpha_{\text{max}}(d\cdot r)}{d\cdot(r_{\text{test}}-r)}$ 
-    \item Update the parameters to $p_{\text{new}}=p+\alpha_{\text{new}}d$
-    \item Calculate the new cost function and residuals for this set of parameters
+    \item Calculate the cost function and residual for this test set of parameters.
+    \item Directly calculate the direction step that minimizes the derivative of the cost function: $\alpha_{\text{new}} = \frac{-\alpha_{\text{max}}(d\cdot r)}{d\cdot(r_{\text{test}}-r)}$ .
+    \item Update the parameters to $p_{\text{new}}=p+\alpha_{\text{new}}d$.
+    \item Calculate the new cost function and residuals for this set of parameters.
 \end{enumerate}
-
 %\Katherine{This described linear_search_general, which we are not using}
 % The algorithm starts by calculating an initial value of the cost function $\epsilon_{0}(\textbf{p})$ and the difference images $\Psi$ given the starting parameters vector $\textbf{p}$. We also define an initial range of parameter space for $\lambda$, the depth of direction step, to search. Then for each iteration $k$,
 % \begin{enumerate}
@@ -659,24 +668,23 @@ Expanding out:
 %         \item or stop iterating if $d\epsilon_k / d\lambda=0$ and return the current ``best'' parameters.
 %     \end{enumerate}
 % \end{enumerate}
-
-\noindent{}The function returns the new values of the parameters, the updated $\Psi$ for the new parameters set, and the corresponding cost and residual values.
+The function returns the new values of the parameters, the updated $\Psi$ for the new parameters set, and the corresponding cost and residual values.
 
 \vskip 0.1in
 
-\noindent{\tt conjugate\_gradient}
+\noindent{\tt conjugate\_gradient}:
 %:Use method of conjugate gradient descent to optimize destriping parameters. 
-\\Takes inputs: 
+This function takes inputs: 
 \begin{list}{$\bullet$}{}
-    \item {\tt p}: a parameters object, initially with all parameters set to zero
-    \item {\tt f, f'}: cost function form and its derivative
-    \item {\tt tol}: Tolerance level; if the norm of the gradient reaches this value, say the solution has converged
-    \item {\tt max\_iter}: Maximum CG iterations to go through before stopping, even if not converged
-    \item {\tt ov\_mat}: Overlap matrix, containing fractional overlap of SCAs in this mosaic
+    \item {\tt p}: a parameters object, initially with all parameters set to zero.
+    \item {\tt f, f'}: the cost function form and its derivative.
+    \item {\tt tol}: the tolerance level; if the norm of the gradient reaches this value, say the solution has converged.
+    \item {\tt max\_iter}: the maximum number of conjugate gradient iterations to go through before stopping, even if not converged.
+    \item {\tt ov\_mat}: the overlap matrix, containing fractional overlap of SCAs in this mosaic.
 \end{list}
-
-\noindent{}The function carries out the process:\\
-For each iterations $k<=\texttt{max\_iter}$,
+The function carries out the process:
+\begin{enumerate}
+\item For each iteration $k<=\texttt{max\_iter}$:
 \begin{enumerate}
     \item Calculate the initial cost $\epsilon_k$ and difference image $\Psi_k$ using {\tt cost\_function($p_k$,f)}
     \item\label{iter} Calculate the gradient $g_k$ using {\tt residual\_function} of $\Psi_k$
@@ -690,8 +698,7 @@ For each iterations $k<=\texttt{max\_iter}$,
     \item If convergence or maximum iterations are reached, finalize the parameters $p$. Otherwise,
     \item return to Item \ref{iter} and repeat the process until either convergence or maximum iterations.
 \end{enumerate}
-
-The performance of this run is summarized in Figure \ref{fig:ds_metrics}
+\end{enumerate}
 
 
 \begin{thebibliography}{} %%% references
@@ -718,9 +725,13 @@ The performance of this run is summarized in Figure \ref{fig:ds_metrics}
 
 \bibitem[DESI Collaboration et al.(2025b)]{DESI2025b} DESI Collaboration et al.\ 2025b, \prd, 112, 083515. doi:10.1103/tr6y-kpc6
 
+\bibitem[Eastwood \& Hockney(1974)]{Eastwood1974} Eastwood, J. \& Hockney, R.\ 1974, J. Comp. Phys., 16, 342. doi:10.1016/0021-9991(74)90044-8
+
 \bibitem[Euclid Collaboration(2025)]{Euclid2025} Euclid Collaboration et al.\ 2025, \aa, 697, 1. doi:10.1051/0004-6361/202450810
 
 \bibitem[Finner et al.(2023)]{Finner2023} Finner, K., Lee, B., Chary, R., et al.\ 2023, \apj, 958, 33. doi:10.3847/1538-4357/acfafd
+
+\bibitem[Ohio Supercomputer Center (1987)]{OSC} Ohio Supercomputer Center, \ 1987, https://ror.org/01apna436
 
 \bibitem[Freudenburg et al.(2020)]{Freudenburg2020} Freudenburg, J., Givans, J., Choi, A., et al.\ 2020, \pasp, 132, 074504. doi:10.1088/1538-3873/ab9503
 
