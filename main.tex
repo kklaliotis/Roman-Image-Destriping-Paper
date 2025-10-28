@@ -284,7 +284,7 @@ The total error in a mosaic image will be calculated as $\epsilon(\mathbf{p}) = 
 
 \subsection{Finding the best-fit de-striping parameters}
 
-To solve for the optimal de-striping parameters ${\boldsymbol p}$, we utilize the method of conjugate gradient descent, minimizing the cost function (Eq.~\ref{eq:epsA}). We implemented both linear and non-linear conjugate gradient methods, but found that the quadratic error metric $f(x)=x^2$, which enables the much faster linear conjugate gradient method, works well, and so this is our current baseline. %\Chris{check if OK}
+To solve for the optimal de-striping parameters ${\boldsymbol p}$, we utilize the method of conjugate gradient descent\footnote{We refer the interested reader to \href{https://www.cs.cmu.edu/~quake-papers/painless-conjugate-gradient.pdf}{An Introduction to the Conjugate Gradient Method Without the Agonizing Pain} for further details on the conjugate gradient algorithm and relevant choices within it}, minimizing the cost function (Eq.~\ref{eq:epsA}). We implemented both linear and non-linear conjugate gradient methods, but found that the quadratic error metric $f(x)=x^2$, which enables the much faster linear conjugate gradient method, works well, and so this is our current baseline. %\Chris{check if OK}
 
 The direction of steepest descent is given by the negative of the residual, 
 \begin{equation} \begin{split} \mathbf{r}
@@ -295,15 +295,6 @@ The direction of steepest descent is given by the negative of the residual,
 & = \sum_{A} \Biggl\{ \sum_{i} \Bigl[ f' \bigl( \tilde{I}_{Ai}-\tilde{J}_{Ai} \bigr) \bigl(-\delta_{\alpha,Ai}-\sum_{Bj}\frac{G_{Bj}w_{Ai;Bj}}{G_{Ai}{\cal N}_{B|Ai}}(-\delta_{\alpha,Bj})\bigr) \Bigr] \Biggr\}.
  \end{split}
  \end{equation}
-
-%The conventional choice for the cost functional form $f$ in conjugate gradient optimization is $f(x)=x^2$, resulting in a linear residual function with a mean of zero. Since the input data is not truly Gaussian, we include an option to use a Huber loss function
-%\begin{equation}
-%f(x) = \begin{cases}
-%|x| & ,\,\, |x| > N \\
-%x^2 & ,\,\, |x| < N
-%\end{cases}\label{eq:HL}
-%\end{equation}
-%as the cost function instead, which may be preferable for mitigating the effects of outliers in the data on parameter optimization. For this work, we perform the optimization of \textbf{p} using the quadratic cost function, chosen for its continuous behavior in all regions. 
 
 The general conjugate gradient algorithm is outlined below; the full algorithm implementation is detailed in Appendix~\ref{app:codenotes}. \texttt{imDestripe} is open-source and can be found in the \textsc{PyIMCOM} repository of the HLIS PIT GitHub Organization\footnote{\href{https://github.com/Roman-HLIS-Cosmology-PIT/PyIMCOM}{https://github.com/Roman-HLIS-Cosmology-PIT/PyIMCOM}}.
 
@@ -320,22 +311,13 @@ To start, the parameters ${\boldsymbol p}_{(0)}=0$. The first gradient is calcul
     (We set $\beta_0=0$.)
     \item Update the conjugate direction, ${\boldsymbol d}_n = {\boldsymbol r}_n + \beta_n {\boldsymbol d}_{n-1}$.
     \item Using a linear search, minimize $\epsilon(I, J,{\boldsymbol p}_n + \alpha_n{\boldsymbol d}_n)$ to recover the optimal direction depth for the next step $\alpha_n$. 
-    %(We tried implementing both bisection and secant searches, but for quadratic functions the secant search reaches the exact minimum on the specified line in 1 iteration.)
     \item Update the parameters ${\boldsymbol p}_{n+1} = {\boldsymbol p}_n + \alpha_n{\boldsymbol d}_n$.
 \end{enumerate}
 
 Convergence can be determined by either a tolerance factor $C_{\rm tol}$ (the algorithm would converge when $||{\boldsymbol r}_n|| \leq C_{\rm tol}\,||{\boldsymbol r}_{(0)}||$) or by a set number of iterations. Because of the large number of parameters and intrinsic variation in the images means, the norm is large. We found that in general it drops by large amounts for the first several iterations and then starts to decline less steeply towards an eventual plateau. In this work we run 11 iterations of conjugate gradient, where the overall norm started to converge towards a steady value. 
 
-%The user can choose between the Fletcher-Reeves, Polak-Ribi\`ere, Hestenes-Steifel, and Dai-Yuan methods for calculating the direction step size $\beta$ \Chris{++refs}. In this work, $\beta$ is updated via the Polak-Ribi\`ere method, as it often converges faster then Fletcher-Reeves and requires less information to be stored than the other two. However, it is known that the Polak-Ribi\`ere method can sometimes lose direction conjugacy and never converge. This potential issue is avoided by selecting the maximum between $\beta^{PR}$ and $0$; resetting $\beta$ to zero restores conjugacy if it has been lost by resetting the direction to the negative gradient
-
-\Chris{need a good place to put this reference}
-\footnote{We refer the interested reader to \href{https://www.cs.cmu.edu/~quake-papers/painless-conjugate-gradient.pdf}{An Introduction to the Conjugate Gradient Method Without the Agonizing Pain} for further details on the conjugate gradient algorithm and relevant choices within it}.
-
-%KL FIX !! This is not true anymore
 Finally, the linear search is carried out by first calculating a test value of $\alpha$ based on the current gradient and then
 calculating derivatives evaluated at the current and test values of $\alpha$. This secant-like update method approximates where the directional derivative would vanish, ensuring a descent step. 
-
-%Finally, the linear search is carried out through a hybrid bisection-secant method, where $\alpha$ is bisected until subsequent steps are within a minimum distance $\delta\alpha$ from one another, at which point the search switches to taking secant steps. The $\delta\alpha$ criterion may be specified by the user; in this work, we use $\delta\alpha<0.01$.
 
 The cost and gradient calculations run in parallel for each SCA in the mosaic, updating the relevant rows of the ${\boldsymbol p}$ vector as they go. The results of the cost and residual functions are summed up when needed to evaluate whether to converge. The decision to parallelize the algorithm was made in order to improve efficiency.
 
@@ -374,14 +356,7 @@ Following \citet{Rauscher2022} we define a noise residual to quantify the promin
 
 Following \citet{Rauscher2022}, we further quantify the deviation of the correlated noise from Gaussian by calculating higher-order moments of our distribution. Deviation of these parameters from their expected values for a normal distribution would indicate that a model more complex than a constant offset (Eq.~\ref{eq:nc-simple}) might be needed to capture the correlated noise accurately. The values of the standard deviation, 3rd moment (skew), and 4th moment (kurtosis) of the row residual distributions for the example image used throughout this work (Obs. 670, SCA 10) are in Table~\ref{tab:distributions}. The standard deviation around the row medians decreases as discussed previously. The third and fourth moments also decrease in magnitude after image destriping.
 
-% \Katherine{note to talk about this on Monday-- this was mostly a guess}
-% However, the skewness and kurtosis actually degrade as compared to the pre-destriping distribution \Chris{they are normalized to the $\sigma$, so the ``absolute'' 3rd and 4th moments have been reduced.}. 
 We note that we do not expect the final destriped images to be perfectly Gaussian; the simulated images used in this work did contain different sky levels and other external noise sources. However, these backgrounds are subdominant to correlated read noise due to \textit{Roman}'s small pixels and short exposure time. Thus the presence of overall gradients or nonzero background levels in the final destriped images actually shows that \texttt{imDestripe} is able to optimally remove correlated noise for each individual exposure, without removing additional background flux not related to the stripes.
-
-% attribute this fact to the the fact that the correlated $1/f$ noise stripes are so dominant over all other sources. After destriping, additional  background effects like sky background will become more dominant in the distribution. An overall skew or kurtosis to the distribution might indicate a gradient of zodiacal light in the image or some other sky effect. . After removing the dominant \textit{1/f} noise, those varying sky levels become detectable.
-% In the future we will incorporate additional background corrections into imDestripe, modifying its goal from removal of stripes to optimal background matching.
-
-% \Chris{maybe worth noting that the simulated images did have different sky levels.}
 
 We also calculate each exposure's mean standard deviation of row median residuals and present the overall distributions before and after \texttt{imDestripe}. The pre-destriping average standard deviation of row means is $1.55$ e/exp in the whole mosaic. After destriping, this is reduced to $0.818$ e/exp. Figure \ref{fig:rmr_stdev} shows this overall shift towards a flatter background.
 
@@ -630,20 +605,21 @@ For each SCA,
 %\Katherine{I know this notation is confusing... $g_A$ is the gradient of A in A coords, $\gamma_A$ is the gradient of A in B coords. So for each image B that overlaps our image A, we add that image gradient but interpolated onto image A grid. So the second term above has index B but it's in A coords. Any ideas to make the notation make sense would be appreciated!!}
 
 Expanding out:
-\begin{equation}
-    r_{\alpha,A} = - \sum_i f'(\Psi_{Ai}) \delta_{\alpha, Ai} 
+\begin{multline}
+    r_{\alpha,A} = - \sum_i f'(\Psi_{Ai}) \delta_{\alpha, Ai} \\
      + \sum_{B} \Bigg[\sum_{j} \frac{ \sum_i w_{Ai;Bj} f'(\Psi_{Ai})}{G_{Ai}{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Bigg]
-\end{equation}
+\end{multline}
 
-\begin{equation}
-    r_{\alpha,A} = - \sum_i f'(\tilde I_{Ai} - \tilde J_{Ai}) \delta_{\alpha, Ai} 
+\begin{multline}
+    r_{\alpha,A} = - \sum_i f'(\tilde I_{Ai} - \tilde J_{Ai}) \delta_{\alpha, Ai} \\
      + \sum_{B} \Bigg[\sum_{j} \frac{\sum_i w_{Ai;Bj} f'(\tilde I_{Ai} - \tilde J_{Ai})}{G_A{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Bigg]
-\end{equation}
+\end{multline}
 
-\begin{equation}
-    r_\alpha = \sum_A \Bigg\{ - \sum_i f'(\tilde I_{Ai} - \tilde J_{Ai}) \delta_{\alpha, Ai} 
+
+\begin{multline}
+    r_\alpha = \sum_A \Bigg\{ - \sum_i f'(\tilde I_{Ai} - \tilde J_{Ai}) \delta_{\alpha, Ai} \\
      + \sum_{B} \Big[\sum_{j} \frac{\sum_i w_{Ai;Bj} f'(\tilde I_{Ai} - \tilde J_{Ai})}{G_A{\cal N}_{A|B}} G_{Bj} \delta_{\alpha, Bj}\Big]\Bigg\}
-\end{equation}
+\end{multline}
 
 
 \vskip 0.1in
